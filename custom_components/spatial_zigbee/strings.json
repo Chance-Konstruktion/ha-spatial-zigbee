@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Zigbee auf den Grundriss",
+        "description": "Nichts einzustellen. Ist Spatial Hub installiert, erscheint die Ebene von selbst."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Schon eingerichtet."
+    }
+  }
+}

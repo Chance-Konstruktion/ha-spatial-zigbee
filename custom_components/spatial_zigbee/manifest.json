@@ -1,0 +1,19 @@
+{
+  "domain": "spatial_zigbee",
+  "name": "Spatial Hub: Zigbee",
+  "after_dependencies": [
+    "zha"
+  ],
+  "codeowners": [
+    "@chance-konstruktion"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/Chance-Konstruktion/ha-spatial-zigbee",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/Chance-Konstruktion/ha-spatial-zigbee/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "260808"
+}

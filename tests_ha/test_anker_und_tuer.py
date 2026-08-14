@@ -136,7 +136,9 @@ def test_geraet_ohne_raum_wird_an_seine_nachbarn_verankert(
     knoten = {k["id"]: k for k in ergebnis["nodes"]}
     frisch = knoten[f"node-{neu}"]
 
-    assert frisch["area_id"] is None, "das Geraet hat wirklich keinen Raum"
+    # Das Shim laesst leere Felder weg -- ein fehlender Schluessel ist
+    # hier die Aussage "kein Bereich", nicht ein Fehler.
+    assert not frisch.get("area_id"), "das Geraet hat wirklich keinen Raum"
     anker = {a["id"]: a["weight"] for a in frisch["anchors"]}
     assert set(anker) == {
         "node-00:11:22:33:44:55:66:01",

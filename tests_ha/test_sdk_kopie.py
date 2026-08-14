@@ -1,0 +1,112 @@
+"""Die mitgelieferte SDK-Kopie gegen die Quelle, aus der sie stammt.
+
+Der Anbieter-Shim und der Konformitaetssatz sind absichtlich kopiert und
+nicht als Paket eingebunden -- die Begruendung steht in `sdk/install.py`
+des Hubs und bleibt richtig. Die Kosten davon sind Kopien, die
+auseinanderlaufen, und genau das ist einmal passiert: Die Anker kamen in
+die sechs ausgelieferten Anbieter, aber nie zurueck ins SDK. Danach trug
+die Quelle -- das, was ein neuer Anbieter-Autor bekommt -- eine
+*aeltere* Fassung als jeder ausgelieferte Anbieter.
+
+Gesehen hat das keiner. Der Hub prueft seine drei Dateien gegeneinander,
+jeder Anbieter prueft seine eigenen; beide Seiten waren in sich stimmig.
+Kein Repository konnte beide Seiten sehen. Dieser Test kann es, weil das
+GitLab ohne Anmeldung lesbar ist.
+
+Die drei Faelle, absichtlich verschieden gewichtet:
+
+* Kopie **neuer** als die Quelle -> Fehler. Dann wurde hier bearbeitet,
+  was im SDK haette bearbeitet werden muessen. Das ist der Fall von oben.
+* gleiche Nummer, anderer Inhalt -> Fehler. Stiller Drift, die
+  schlimmste Sorte: die Versionsnummer behauptet Gleichheit.
+* Kopie **aelter** als die Quelle -> uebersprungen, mit Grund im Log.
+  Das ist kein Fehler, sondern die Zusage des Entwurfs: eine alte Kopie
+  laeuft weiter, und der Hub sagt in seiner Diagnose Bescheid.
+
+Ohne Netz wird uebersprungen, ebenfalls mit Grund. Ein Test, der bei
+Netzausfall rot wird, wird nach dem zweiten Mal ignoriert.
+"""
+
+from __future__ import annotations
+
+import re
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+import pytest
+
+WURZEL = Path(__file__).resolve().parents[1]
+QUELLE = (
+    "https://gitlab.schanz.ipv64.net/chance-konstruktion/ha-spatial-hub"
+    "/-/raw/main/sdk/"
+)
+# Wo die beiden Dateien in diesem Repository liegen, wird gesucht statt
+# eingetragen: Der Satz liegt je nach Anbieter in tests/ oder tests_ha/,
+# und der Shim unter einem Ordner, dessen Namen diese Datei nicht kennt.
+DATEIEN = ("spatial_hub_provider.py", "spatial_hub_conformance.py")
+
+
+def _hier(name: str) -> Path:
+    treffer = [p for p in WURZEL.rglob(name) if ".git" not in p.parts]
+    assert treffer, f"{name} liegt nirgends in diesem Repository"
+    assert len(treffer) == 1, (
+        f"{name} liegt mehrfach hier: {sorted(str(p) for p in treffer)} -- "
+        "welche davon die gueltige ist, kann dieser Test nicht raten"
+    )
+    return treffer[0]
+
+
+def _stempel(text: str) -> int:
+    treffer = re.search(r"^SDK_VERSION = (\d+)", text, re.M)
+    assert treffer, "die Datei hat kein SDK_VERSION -- ist sie noch die richtige?"
+    return int(treffer.group(1))
+
+
+def _quelle(name: str) -> str:
+    try:
+        with urllib.request.urlopen(QUELLE + name, timeout=15) as antwort:
+            return antwort.read().decode("utf-8")
+    except (urllib.error.URLError, TimeoutError, OSError) as fehler:
+        pytest.skip(f"{QUELLE + name} nicht erreichbar ({fehler}) -- ungeprueft")
+
+
+@pytest.mark.parametrize("name", DATEIEN)
+def test_die_kopie_ist_nicht_neuer_als_die_quelle(name: str) -> None:
+    """Wer hier bearbeitet, bearbeitet die Kopie und nicht das Original."""
+    hier = _hier(name).read_text(encoding="utf-8")
+    dort = _quelle(name)
+
+    assert _stempel(hier) <= _stempel(dort), (
+        f"{name} ist hier SDK_VERSION {_stempel(hier)}, im SDK des Hubs aber "
+        f"{_stempel(dort)}. Diese Datei wird kopiert, nicht gepflegt: Die "
+        "Aenderung gehoert nach ha-spatial-hub/sdk/, von dort in die "
+        "examples/ und erst dann per `python3 sdk/install.py` hierher."
+    )
+
+
+@pytest.mark.parametrize("name", DATEIEN)
+def test_gleiche_nummer_heisst_gleicher_inhalt(name: str) -> None:
+    """Die Nummer ist eine Zusage. Ein Test macht sie zu einer.
+
+    Zwei Dateien mit demselben Stempel und verschiedenem Inhalt sind der
+    unangenehmste Fall: Beide Seiten halten sich fuer aktuell, und die
+    Diagnose des Hubs meldet nichts, weil sie nur die Nummer sieht.
+    """
+    pfad = _hier(name)
+    hier = pfad.read_text(encoding="utf-8")
+    dort = _quelle(name)
+
+    if _stempel(hier) < _stempel(dort):
+        ordner = pfad.parent.relative_to(WURZEL).as_posix()
+        pytest.skip(
+            f"{name} ist SDK_VERSION {_stempel(hier)}, aktuell waere "
+            f"{_stempel(dort)} -- erlaubt, aber es gibt eine neuere: "
+            f"`python3 sdk/install.py --into {ordner}`"
+        )
+
+    assert hier == dort, (
+        f"{name} traegt hier dieselbe SDK_VERSION wie im Hub, hat aber "
+        "anderen Inhalt. Eine der beiden Seiten wurde bearbeitet, ohne den "
+        "Stempel zu erhoehen -- ab hier ist die Nummer wertlos."
+    )

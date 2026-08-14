@@ -32,10 +32,13 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.event import async_track_time_interval
 
-from .spatial_hub_provider import edge, node, spatial_provider
+from .spatial_hub_provider import anchor, edge, node, spatial_provider
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +66,26 @@ def _quality(lqi: Any) -> str:
     if value >= _FAIR:
         return "fair"
     return "poor"
+
+
+def _gewicht(lqi: Any) -> float:
+    """Aus einer Verbindungsguete ein Ankergewicht -- naeher heisst hoeher.
+
+    LQI ist 0..255 und waechst mit der Naehe, anders als ein dBm-Wert.
+    Es laesst sich also direkt verwenden; quadriert, weil der Unterschied
+    zwischen 240 und 120 raeumlich viel mehr bedeutet als der zwischen
+    120 und 60. Ohne das zieht ein weit entfernter Nachbar den Punkt
+    genauso stark wie der im selben Raum.
+
+    Der kleine Sockel verhindert ein Gewicht von null: eine gerade noch
+    messbare Verbindung ist eine Aussage, nur eine schwache.
+    """
+    try:
+        wert = max(0.0, min(255.0, float(lqi)))
+    except (TypeError, ValueError):
+        return 0.01
+    anteil = wert / 255.0
+    return max(0.01, anteil * anteil)
 
 
 def _attr(source: Any, *names: str) -> Any:
@@ -116,21 +139,56 @@ def _ieee(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
-def _area_of(hass: HomeAssistant, ieee: str) -> str | None:
-    """Where the user already put this node's device.
+def _ort_und_tuer(hass: HomeAssistant, ieee: str) -> tuple[str | None, str | None]:
+    """Bereich und eine Entitaet dieses Knotens -- beides aus einem Blick.
 
-    ZHA identifies a device as ``("zha", str(ieee))``. Reading it here is
-    a lookup, not a filter -- a miss costs an area, not the node, which is
-    what makes it safe to depend on the format at all.
+    ZHA identifiziert ein Geraet als ``("zha", str(ieee))``. Das hier ist
+    ein Nachschlagen, kein Filtern -- ein Fehlschlag kostet den Bereich,
+    nicht den Knoten. Genau deshalb darf man sich auf das Format ueberhaupt
+    stuetzen.
+
+    Die Entitaet ist die Tuer nach Home Assistant. Ohne sie ist ein
+    Zigbee-Punkt auf dem Grundriss eine Sackgasse: kein Klick zum Geraet,
+    keine Entitaetenliste im Aufklapper, und der Hub kann auch nichts
+    ergaenzen -- er haengt seine Anreicherung an ``entity_id``. Ein
+    Nutzer, der auf seine Deckenlampe tippt und nichts bekommt, hoert auf
+    zu tippen.
     """
     if not ieee:
-        return None
+        return None, None
     try:
         registry = dr.async_get(hass)
+        device = registry.async_get_device(identifiers={(ZHA_DOMAIN, ieee)})
     except (AttributeError, KeyError):  # pragma: no cover
+        return None, None
+    if device is None:
+        return None, None
+    return getattr(device, "area_id", None), _tuer(hass, device.id)
+
+
+def _tuer(hass: HomeAssistant, device_id: str) -> str | None:
+    """Die Entitaet, die ein Nutzer meint, wenn er auf das Geraet tippt.
+
+    Diagnose-Entitaeten -- Signalstaerke, Batteriestand, Neustart-Knopf --
+    stehen hinten an. Wer auf eine Lampe tippt, will das Licht schalten
+    und nicht ihre Verbindungsqualitaet sehen.
+    """
+    try:
+        registry = er.async_get(hass)
+        eintraege = er.async_entries_for_device(
+            registry, device_id, include_disabled_entities=False
+        )
+    except (AttributeError, KeyError, TypeError):  # pragma: no cover
         return None
-    device = registry.async_get_device(identifiers={(ZHA_DOMAIN, ieee)})
-    return device.area_id if device else None
+    if not eintraege:
+        return None
+    return sorted(
+        eintraege,
+        key=lambda eintrag: (
+            getattr(eintrag, "entity_category", None) is not None,
+            eintrag.entity_id,
+        ),
+    )[0].entity_id
 
 
 # What a device is *for* in the mesh, which is the thing a mesh map exists
@@ -179,6 +237,12 @@ def _from_gateway(hass: HomeAssistant, gateway: Any) -> dict[str, list]:
     edges = []
     known: set[str] = set()
     coordinator: str | None = None
+    # Knoten und Bereich je Adresse, damit die Anker weiter unten an
+    # dieselben Objekte koennen -- gebaut werden sie vor den Kanten, aber
+    # verankert wird erst, wenn die Nachbartabellen ausgewertet sind.
+    knoten_nach_ieee: dict[str, dict] = {}
+    bereiche: dict[str, str | None] = {}
+    anker_je_knoten: dict[str, list] = {}
 
     for zha_device in devices:
         ieee = _ieee(_attr(zha_device, "ieee"))
@@ -194,13 +258,15 @@ def _from_gateway(hass: HomeAssistant, gateway: Any) -> dict[str, list]:
         state = "online" if available else (
             "asleep" if role == "Endgerät" else "offline"
         )
-        nodes.append(
-            node(
+        bereich, tuer = _ort_und_tuer(hass, ieee)
+        bereiche[ieee] = bereich
+        knoten_nach_ieee[ieee] = node(
                 f"node-{ieee}",
                 label=str(
                     _attr(zha_device, "user_given_name", "name") or f"Zigbee {ieee}"
                 ),
-                area_id=_area_of(hass, ieee),
+                area_id=bereich,
+                entity_id=tuer,
                 state=state,
                 icon="mdi:zigbee" if state == "online" else "mdi:sleep",
                 rolle=role,
@@ -212,8 +278,8 @@ def _from_gateway(hass: HomeAssistant, gateway: Any) -> dict[str, list]:
                 rssi=_attr(zha_device, "rssi"),
                 stromquelle=_attr(zha_device, "power_source") or "",
                 quelle="gateway",
-            )
         )
+        nodes.append(knoten_nach_ieee[ieee])
 
     # Neighbour tables are symmetric in practice -- A lists B and B lists A
     # -- so the same link arrives twice with two LQI readings. Keep one
@@ -247,6 +313,32 @@ def _from_gateway(hass: HomeAssistant, gateway: Any) -> dict[str, list]:
             )
         )
 
+    # Aus derselben Nachbartabelle wird ein Ort.
+    #
+    # Eine Kante sagt "die beiden hoeren sich". Ein Anker sagt "der eine
+    # ist beim anderen", und der Hub rechnet daraus eine Position. Fuer
+    # ein Zigbee-Geraet, dem niemand einen Raum gegeben hat, ist das der
+    # Unterschied zwischen einem Punkt in der Mitte des Grundrisses und
+    # einem Punkt in der Kueche.
+    #
+    # Verankert wird nur an Knoten, die selbst irgendwo liegen -- also an
+    # Geraeten mit Bereich. Ein Anker auf ein Geraet, das selbst nur
+    # geraten ist, traegt keine Messung, sondern verteilt eine Vermutung.
+    verortet = {ieee for ieee, bereich in bereiche.items() if bereich}
+    for eigene in known:
+        if eigene in verortet:
+            # Wer selbst einen Raum hat, braucht keinen Anker -- und der
+            # Hub wuerde ihn ohnehin nicht ueberstimmen.
+            continue
+        anker = [
+            anchor(f"node-{gegen}", _gewicht(lqi))
+            for (links_, rechts), lqi in links.items()
+            for eigen, gegen in ((links_, rechts), (rechts, links_))
+            if eigen == eigene and gegen in verortet
+        ]
+        if anker:
+            anker_je_knoten[eigene] = anker
+
     # A mesh with no neighbour tables yet -- freshly paired, or a
     # coordinator that has not been asked -- would draw as loose dots.
     # Fall back to the star so there is still a picture.
@@ -264,6 +356,18 @@ def _from_gateway(hass: HomeAssistant, gateway: Any) -> dict[str, list]:
                     dashed=True,
                 )
             )
+
+    # Anker an die fertigen Knoten haengen. Erst hier, weil sie aus den
+    # Nachbartabellen kommen und die stehen erst nach den Kanten fest.
+    for ieee, anker in anker_je_knoten.items():
+        knoten = knoten_nach_ieee.get(ieee)
+        if knoten is not None:
+            # Die staerksten zuerst und gedeckelt: eine Handvoll guter
+            # Messungen ergibt einen Ort, dreissig schwache ergeben die
+            # Mitte des Hauses.
+            knoten["anchors"] = sorted(
+                anker, key=lambda a: a["weight"], reverse=True
+            )[:6]
 
     return {"nodes": nodes, "edges": edges}
 

@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 node_modules/
 package-lock.json
+
+# Zwischenergebnis von tools/make_provider_icons.py im Hub -- gehoert auf den
+# GitLab-Avatar, nicht ins Repository.
+avatar.png

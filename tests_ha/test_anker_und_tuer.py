@@ -26,6 +26,8 @@ from homeassistant.helpers import (
 )
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from spatial_hub_conformance import SpatialHubConformance
+
 from custom_components.spatial_zigbee.spatial import _from_gateway, _gewicht
 
 ZHA = "zha"
@@ -216,3 +218,46 @@ def test_gewicht_waechst_ueberproportional() -> None:
     wie der im selben Raum, und der Punkt landete auf dem Flur.
     """
     assert _gewicht(200) / _gewicht(100) == pytest.approx(4.0, abs=0.1)
+
+
+# ── Der volle Konformitaetssatz, gegen eine NICHT leere Nutzlast ──────
+
+
+class TestKonformitaetMitGateway(SpatialHubConformance):
+    """Der Satz aus dem SDK, an einem Mesh mit Inhalt.
+
+    Die uebrige Suite prueft den Weg ohne ZHA, und eine leere Nutzlast
+    erfuellt jeden Vertrag muehelos -- sie beweist nichts. Erst hier
+    laufen die Pruefungen gegen echte Knoten, echte Kanten und echte
+    Anker: stabile Kennungen ueber zwei Abrufe, Metadaten, die sich ueber
+    den Websocket senden lassen, keine Kante ins Leere, und Ankergewichte,
+    die positiv und endlich sind.
+
+    Wenn diese Klasse faellt, ist der Adapter vom Vertrag abgewichen --
+    nicht der Vertrag vom Adapter.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _haus_und_gateway(self, hass, haus):
+        """Home Assistant und das Mesh, bevor der Satz die Anmeldung holt."""
+        self._hass = hass
+        yield
+
+    def build_registration(self):
+        from custom_components.spatial_zigbee.spatial import async_setup_spatial
+
+        eintrag = MockConfigEntry(domain="spatial_zigbee", title="Spatial Zigbee")
+        eintrag.add_to_hass(self._hass)
+        neu = "00:11:22:33:44:55:66:09"
+        self._hass.data[ZHA] = _gateway(
+            _zha_geraet("00:11:22:33:44:55:66:01", "Koordinator",
+                        nachbarn=[("00:11:22:33:44:55:66:02", 220), (neu, 240)]),
+            _zha_geraet("00:11:22:33:44:55:66:02", "Router",
+                        nachbarn=[("00:11:22:33:44:55:66:01", 220), (neu, 60)]),
+            _zha_geraet(neu, "Endgerät", nachbarn=[
+                ("00:11:22:33:44:55:66:01", 240),
+                ("00:11:22:33:44:55:66:02", 60),
+            ]),
+        )
+        async_setup_spatial(self._hass, eintrag)
+        return self._hass.data["spatial_hub_providers"]["spatial_zigbee"]

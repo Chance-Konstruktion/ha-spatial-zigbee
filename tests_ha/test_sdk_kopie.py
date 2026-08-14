@@ -34,6 +34,7 @@ import socket
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -74,6 +75,12 @@ def netz():
     ist keiner mehr. Dieser Test *muss* aber hinaus, das ist sein ganzer
     Zweck. Also wird die Sperre genau um ihn herum geoeffnet und danach
     wieder geschlossen -- und nur dann, wenn sie vorher zu war.
+
+    Die Sperre hat zwei Schloesser, und das war beim ersten Versuch nicht
+    klar: ``enable_socket`` gibt das Erzeugen eines Sockets frei, aber
+    ``connect`` prueft zusaetzlich gegen eine Host-Liste, auf der nur
+    127.0.0.1 steht. Nur das erste zu oeffnen sah aus wie ein Fortschritt
+    -- drei der vier Tests liefen -- und war trotzdem nutzlos.
     """
     try:
         import pytest_socket
@@ -88,11 +95,16 @@ def netz():
     else:
         war_zu = False
 
+    hosts = getattr(pytest_socket, "socket_allow_hosts", None)
     pytest_socket.enable_socket()
+    if hosts:
+        hosts([urlsplit(QUELLE).hostname, "127.0.0.1"], allow_unix_socket=True)
     try:
         yield
     finally:
         if war_zu:
+            if hosts:
+                hosts(["127.0.0.1"], allow_unix_socket=True)
             pytest_socket.disable_socket()
 
 

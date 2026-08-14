@@ -30,6 +30,7 @@ Netzausfall rot wird, wird nach dem zweiten Mal ignoriert.
 from __future__ import annotations
 
 import re
+import socket
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -63,6 +64,38 @@ def _stempel(text: str) -> int:
     return int(treffer.group(1))
 
 
+@pytest.fixture
+def netz():
+    """Sockets fuer die Dauer dieses Tests, falls sie gesperrt sind.
+
+    In tests_ha/ laeuft pytest-socket mit (es kommt mit
+    pytest-homeassistant-custom-component) und sperrt jeden echten
+    Netzzugriff -- zu Recht: Ein Integrationstest, der ans Internet geht,
+    ist keiner mehr. Dieser Test *muss* aber hinaus, das ist sein ganzer
+    Zweck. Also wird die Sperre genau um ihn herum geoeffnet und danach
+    wieder geschlossen -- und nur dann, wenn sie vorher zu war.
+    """
+    try:
+        import pytest_socket
+    except ImportError:  # in tests/ ohne Home Assistant gar nicht dabei
+        yield
+        return
+
+    try:
+        socket.socket().close()
+    except pytest_socket.SocketBlockedError:
+        war_zu = True
+    else:
+        war_zu = False
+
+    pytest_socket.enable_socket()
+    try:
+        yield
+    finally:
+        if war_zu:
+            pytest_socket.disable_socket()
+
+
 def _quelle(name: str) -> str:
     try:
         with urllib.request.urlopen(QUELLE + name, timeout=15) as antwort:
@@ -72,7 +105,7 @@ def _quelle(name: str) -> str:
 
 
 @pytest.mark.parametrize("name", DATEIEN)
-def test_die_kopie_ist_nicht_neuer_als_die_quelle(name: str) -> None:
+def test_die_kopie_ist_nicht_neuer_als_die_quelle(name: str, netz) -> None:
     """Wer hier bearbeitet, bearbeitet die Kopie und nicht das Original."""
     hier = _hier(name).read_text(encoding="utf-8")
     dort = _quelle(name)
@@ -86,7 +119,7 @@ def test_die_kopie_ist_nicht_neuer_als_die_quelle(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", DATEIEN)
-def test_gleiche_nummer_heisst_gleicher_inhalt(name: str) -> None:
+def test_gleiche_nummer_heisst_gleicher_inhalt(name: str, netz) -> None:
     """Die Nummer ist eine Zusage. Ein Test macht sie zu einer.
 
     Zwei Dateien mit demselben Stempel und verschiedenem Inhalt sind der

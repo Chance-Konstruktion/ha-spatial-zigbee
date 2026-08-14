@@ -26,6 +26,7 @@ da, die diese Innereien nachbaut.
 
 from __future__ import annotations
 
+import inspect
 import json
 
 import pytest
@@ -82,35 +83,48 @@ def test_die_anmeldung_haelt_den_hub_vertrag_ein(registrierung):
 # ── Das Verhalten ohne die fremde Integration ─────────────────────────
 
 
-def test_ohne_zha_liefert_data_eine_leere_ebene(registrierung):
+async def _nutzlast(registrierung) -> dict:
+    """Was ``data()`` liefert, in einheitlicher Form.
+
+    Die Anbieter sind sich hier absichtlich nicht einig: die meisten
+    lesen aus Registries und antworten sofort, Thread fragt seinen
+    Router und ist deshalb asynchron. Der Hub nimmt beides -- und diese
+    Tests sollen dieselbe Vorlage bleiben, statt sich in zwei Fassungen
+    zu teilen. Eine blanke Liste steht fuer "nur Knoten, keine Kanten".
+    """
+    nutzlast = registrierung["data"]()
+    if inspect.isawaitable(nutzlast):
+        nutzlast = await nutzlast
+    if isinstance(nutzlast, list):
+        nutzlast = {"nodes": nutzlast}
+    return nutzlast
+
+
+async def test_ohne_zha_liefert_data_eine_leere_ebene(registrierung):
     """Kein ZHA im Haus heisst leer -- nicht kaputt.
 
     Der teure Fehler waere eine Ausnahme: der Hub verwirft dann die ganze
     Ebene fuer diesen Durchlauf, und im Log steht ein Stapelabzug statt
     "hier ist nichts".
     """
-    nutzlast = registrierung["data"]()
-    if isinstance(nutzlast, list):
-        nutzlast = {"nodes": nutzlast}
-    assert nutzlast.get("nodes") == []
+    assert (await _nutzlast(registrierung)).get("nodes") == []
 
 
-def test_data_bleibt_ueber_wiederholte_abfragen_ruhig(registrierung):
+async def test_data_bleibt_ueber_wiederholte_abfragen_ruhig(registrierung):
     """Der Hub fragt im Takt. Der zweite Aufruf muss so ruhig sein wie der
     erste -- ein Zustand, der beim ersten Mal angelegt und beim zweiten
     Mal falsch gelesen wird, faellt sonst erst nach Minuten auf."""
     for _ in range(3):
-        registrierung["data"]()
+        await _nutzlast(registrierung)
 
 
-def test_die_nutzlast_ueberlebt_den_websocket(registrierung):
+async def test_die_nutzlast_ueberlebt_den_websocket(registrierung):
     """Alles geht als JSON an den Browser.
 
     Ein datetime, ein set oder eine eigene Klasse in den Metadaten nimmt
     das ganze Modell mit -- fuer jeden Anbieter, nicht nur diesen.
     """
-    nutzlast = registrierung["data"]()
-    json.dumps(nutzlast)
+    json.dumps(await _nutzlast(registrierung))
 
 
 # ── Der Lebenszyklus ──────────────────────────────────────────────────

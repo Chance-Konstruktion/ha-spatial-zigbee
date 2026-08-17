@@ -71,12 +71,21 @@ def test_der_adapter_meldet_sich_am_hub_an(registrierung):
 def test_die_anmeldung_haelt_den_hub_vertrag_ein(registrierung):
     """Der mitgelieferte Konformitaets-Satz, gegen ein echtes hass.
 
-    Er prueft die Dinge, die Grundrisse im Feld zerlegen: Knoten-IDs, die
-    sich zwischen zwei Abfragen aendern und dabei jede gespeicherte
-    Position wegwerfen; Kanten auf Knoten, die es nicht gibt; Metadaten,
-    die nicht durch den Websocket passen.
+    Dieser Aufbau laeuft **ohne die fremde Integration**, also ohne ein
+    einziges Geraet. Das ist Absicht -- geprueft wird, dass die Anmeldung
+    auch dann steht. Es heisst aber auch: Es gibt hier nichts zu zaehlen,
+    und alle Regeln, die ueber Knoten und Kanten laufen, laufen ueber
+    leere Listen.
+
+    Deshalb `expects_data=False`. Bis heute stand hier stattdessen im
+    Docstring, geprueft wuerden Knoten-IDs, Kanten und Metadaten -- nichts
+    davon wurde je ausgefuehrt, und der Test war trotzdem gruen. Genau
+    diese Sorte gruener Haken soll das Kit verhindern.
+
+    Der Vertrag MIT Inhalt wird in tests_ha/test_anker_und_tuer.py
+    geprueft (TestKonformitaetMitGateway).
     """
-    probleme = check(registrierung)
+    probleme = check(registrierung, expects_data=False)
     assert not probleme, "Verstoesse gegen den Hub-Vertrag:\n  " + "\n  ".join(probleme)
 
 

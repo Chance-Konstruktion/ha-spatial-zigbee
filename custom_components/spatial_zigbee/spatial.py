@@ -43,6 +43,30 @@ from .spatial_hub_provider import anchor, edge, node, spatial_provider
 _LOGGER = logging.getLogger(__name__)
 
 ZHA_DOMAIN = "zha"
+
+
+def _geraet_zu_kennung(hass: HomeAssistant, registry: Any, kennung: tuple) -> Any:
+    """The device carrying ``kennung``, looked up per config entry.
+
+    ``async_get_device(identifiers=...)`` is deprecated: an identifier is
+    no longer unique across config entries, so Core wants the entry named,
+    and the old call stops working in Home Assistant 2027.8. The
+    identifier here belongs to ZHA, not to us, so the entries to ask are
+    ZHA's own -- usually exactly one, and more only in a house with two
+    coordinators.
+
+    On installs older than 2025.9 the per-entry lookup does not exist yet;
+    there the previous call is still the correct one. Which way applies is
+    decided by asking the registry what it can do, never by a version.
+    """
+    per_entry = getattr(registry, "async_get_device_by_identifier", None)
+    if per_entry is None:  # pre-2025.9
+        return registry.async_get_device(identifiers={kennung})
+    for eintrag in hass.config_entries.async_entries(ZHA_DOMAIN):
+        device = per_entry(kennung, eintrag.entry_id)
+        if device is not None:
+            return device
+    return None
 COORDINATOR_ID = "coordinator"
 
 # Zigbee neighbour tables are refreshed slowly by the network itself, so
@@ -158,7 +182,7 @@ def _ort_und_tuer(hass: HomeAssistant, ieee: str) -> tuple[str | None, str | Non
         return None, None
     try:
         registry = dr.async_get(hass)
-        device = registry.async_get_device(identifiers={(ZHA_DOMAIN, ieee)})
+        device = _geraet_zu_kennung(hass, registry, (ZHA_DOMAIN, ieee))
     except (AttributeError, KeyError):  # pragma: no cover
         return None, None
     if device is None:

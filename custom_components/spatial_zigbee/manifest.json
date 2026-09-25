@@ -1,6 +1,6 @@
 {
   "domain": "spatial_zigbee",
-  "name": "Spatial Hub: Zigbee",
+  "name": "spatial-hub: zigbee",
   "after_dependencies": [
     "zha"
   ],

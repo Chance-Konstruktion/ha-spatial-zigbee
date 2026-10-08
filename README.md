@@ -27,9 +27,15 @@ nur noch nichts zu erzaehlen.
 
 ## Installation
 
+Dieser Knopf oeffnet das Repository in deiner eigenen HACS-Installation und traegt es dabei automatisch als benutzerdefiniertes Repository ein:
+
+[![Öffne deine Home-Assistant-Instanz und dieses Repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Chance-Konstruktion&repository=ha-spatial-zigbee&category=integration)
+
 Ueber HACS als benutzerdefiniertes Repository, oder von Hand:
 `custom_components/spatial_zigbee/` nach `config/custom_components/` kopieren und
 Home Assistant neu starten.
+
+[![Öffne deine Home-Assistant-Instanz und starte die Einrichtung der Integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=spatial_zigbee)
 
 ## Warum nichts aus `spatial_hub` importiert wird
 

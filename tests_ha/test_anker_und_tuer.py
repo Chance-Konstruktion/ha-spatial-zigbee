@@ -116,6 +116,23 @@ def test_entity_registry_is_indexed_once_per_gateway_refresh(
     assert calls == 1, "the entity registry should be indexed only once"
 
 
+def test_offline_router_uses_disconnect_icon(hass: HomeAssistant, haus) -> None:
+    """An offline router must not look like a sleeping battery device."""
+    ergebnis = _from_gateway(
+        hass,
+        _gateway(
+            _zha_geraet(
+                "00:11:22:33:44:55:66:01", "Router", available=False
+            )
+        ).gateway,
+    )
+    knoten = {k["id"]: k for k in ergebnis["nodes"]}
+    router = knoten["node-00:11:22:33:44:55:66:01"]
+
+    assert router["state"] == "offline"
+    assert router["icon"] == "mdi:lan-disconnect"
+
+
 def test_knoten_bekommt_bereich_und_entitaet_aus_dem_register(
     hass: HomeAssistant, haus
 ) -> None:

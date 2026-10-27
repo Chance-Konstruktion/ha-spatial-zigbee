@@ -305,7 +305,12 @@ def _from_gateway(hass: HomeAssistant, gateway: Any) -> dict[str, list]:
                 area_id=bereich,
                 entity_id=tuer,
                 state=state,
-                icon="mdi:zigbee" if state == "online" else "mdi:sleep",
+                icon={
+                    "online": "mdi:zigbee",
+                    "asleep": "mdi:sleep",
+                    "offline": "mdi:lan-disconnect",
+                    "unknown": "mdi:help-circle-outline",
+                }.get(state, "mdi:help-circle-outline"),
                 rolle=role,
                 ieee=ieee,
                 nwk=_attr(zha_device, "nwk"),
@@ -433,6 +438,7 @@ def _from_registry(hass: HomeAssistant) -> dict[str, list]:
              icon="mdi:zigbee", rolle="Koordinator", quelle="registry")
     ]
     edges = []
+    entities_by_device = _entities_by_device(hass)
     for device in devices:
         nodes.append(
             node(
@@ -441,6 +447,7 @@ def _from_registry(hass: HomeAssistant) -> dict[str, list]:
                 or getattr(device, "name", "")
                 or "Zigbee Gerät",
                 area_id=getattr(device, "area_id", None),
+                entity_id=_tuer(hass, device.id, entities_by_device),
                 icon="mdi:zigbee",
                 hersteller=getattr(device, "manufacturer", "") or "",
                 modell=getattr(device, "model", "") or "",

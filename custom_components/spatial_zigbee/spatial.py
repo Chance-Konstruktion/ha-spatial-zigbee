@@ -163,7 +163,11 @@ def _ieee(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
-def _ort_und_tuer(hass: HomeAssistant, ieee: str) -> tuple[str | None, str | None]:
+def _ort_und_tuer(
+    hass: HomeAssistant,
+    ieee: str,
+    entities_by_device: dict[str, list[Any]] | None = None,
+) -> tuple[str | None, str | None]:
     """Bereich und eine Entitaet dieses Knotens -- beides aus einem Blick.
 
     ZHA identifiziert ein Geraet als ``("zha", str(ieee))``. Das hier ist
@@ -187,33 +191,40 @@ def _ort_und_tuer(hass: HomeAssistant, ieee: str) -> tuple[str | None, str | Non
         return None, None
     if device is None:
         return None, None
-    return getattr(device, "area_id", None), _tuer(hass, device.id)
+    return getattr(device, "area_id", None), _tuer(hass, device.id, entities_by_device)
 
 
-def _tuer(hass: HomeAssistant, device_id: str) -> str | None:
-    """Die Entitaet, die ein Nutzer meint, wenn er auf das Geraet tippt.
-
-    Diagnose-Entitaeten -- Signalstaerke, Batteriestand, Neustart-Knopf --
-    stehen hinten an. Wer auf eine Lampe tippt, will das Licht schalten
-    und nicht ihre Verbindungsqualitaet sehen.
-    """
+def _entities_by_device(hass: HomeAssistant) -> dict[str, list[Any]]:
+    """Index enabled entities once for the current gateway refresh."""
     try:
         registry = er.async_get(hass)
-        eintraege = er.async_entries_for_device(
-            registry, device_id, include_disabled_entities=False
+    except (AttributeError, KeyError):  # pragma: no cover
+        return {}
+    by_device: dict[str, list[Any]] = {}
+    for entry in getattr(registry, "entities", {}).values():
+        device_id = getattr(entry, "device_id", None)
+        if device_id and not getattr(entry, "disabled_by", None):
+            by_device.setdefault(device_id, []).append(entry)
+    for entries in by_device.values():
+        entries.sort(
+            key=lambda entry: (
+                getattr(entry, "entity_category", None) is not None,
+                entry.entity_id,
+            )
         )
-    except (AttributeError, KeyError, TypeError):  # pragma: no cover
-        return None
-    if not eintraege:
-        return None
-    return sorted(
-        eintraege,
-        key=lambda eintrag: (
-            getattr(eintrag, "entity_category", None) is not None,
-            eintrag.entity_id,
-        ),
-    )[0].entity_id
+    return by_device
 
+
+def _tuer(
+    hass: HomeAssistant,
+    device_id: str,
+    entities_by_device: dict[str, list[Any]] | None = None,
+) -> str | None:
+    """The user's main entity for this device, excluding diagnostics."""
+    if entities_by_device is None:
+        entities_by_device = _entities_by_device(hass)
+    entries = entities_by_device.get(device_id, [])
+    return entries[0].entity_id if entries else None
 
 # What a device is *for* in the mesh, which is the thing a mesh map exists
 # to show: routers are the backbone, end devices hang off it.
@@ -268,6 +279,8 @@ def _from_gateway(hass: HomeAssistant, gateway: Any) -> dict[str, list]:
     bereiche: dict[str, str | None] = {}
     anker_je_knoten: dict[str, list] = {}
 
+    entities_by_device = _entities_by_device(hass)
+
     for zha_device in devices:
         ieee = _ieee(_attr(zha_device, "ieee"))
         if not ieee:
@@ -282,7 +295,7 @@ def _from_gateway(hass: HomeAssistant, gateway: Any) -> dict[str, list]:
         state = "online" if available else (
             "asleep" if role == "Endgerät" else "offline"
         )
-        bereich, tuer = _ort_und_tuer(hass, ieee)
+        bereich, tuer = _ort_und_tuer(hass, ieee, entities_by_device)
         bereiche[ieee] = bereich
         knoten_nach_ieee[ieee] = node(
                 f"node-{ieee}",
@@ -425,6 +438,7 @@ def _from_registry(hass: HomeAssistant) -> dict[str, list]:
              icon="mdi:zigbee", rolle="Koordinator", quelle="registry")
     ]
     edges = []
+    entities_by_device = _entities_by_device(hass)
     for device in devices:
         nodes.append(
             node(
@@ -433,7 +447,7 @@ def _from_registry(hass: HomeAssistant) -> dict[str, list]:
                 or getattr(device, "name", "")
                 or "Zigbee Gerät",
                 area_id=getattr(device, "area_id", None),
-                entity_id=_tuer(hass, device.id),
+                entity_id=_tuer(hass, device.id, entities_by_device),
                 icon="mdi:zigbee",
                 hersteller=getattr(device, "manufacturer", "") or "",
                 modell=getattr(device, "model", "") or "",

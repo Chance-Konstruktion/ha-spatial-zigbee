@@ -92,6 +92,30 @@ def _gateway(*geraete):
         devices={g.ieee: g for g in geraete}))
 
 
+def test_entity_registry_is_indexed_once_per_gateway_refresh(
+    hass: HomeAssistant, haus, monkeypatch
+) -> None:
+    original_get = er.async_get
+    calls = 0
+
+    def counted_get(instance):
+        nonlocal calls
+        calls += 1
+        return original_get(instance)
+
+    monkeypatch.setattr(er, "async_get", counted_get)
+    payload = _from_gateway(
+        hass,
+        _gateway(
+            _zha_geraet("00:11:22:33:44:55:66:01", "Router"),
+            _zha_geraet("00:11:22:33:44:55:66:02", "Router"),
+        ).gateway,
+    )
+
+    assert len(payload["nodes"]) == 2
+    assert calls == 1, "the entity registry should be indexed only once"
+
+
 def test_knoten_bekommt_bereich_und_entitaet_aus_dem_register(
     hass: HomeAssistant, haus
 ) -> None:

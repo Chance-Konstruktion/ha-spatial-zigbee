@@ -292,7 +292,12 @@ def _from_gateway(hass: HomeAssistant, gateway: Any) -> dict[str, list]:
                 area_id=bereich,
                 entity_id=tuer,
                 state=state,
-                icon="mdi:zigbee" if state == "online" else "mdi:sleep",
+                icon={
+                    "online": "mdi:zigbee",
+                    "asleep": "mdi:sleep",
+                    "offline": "mdi:lan-disconnect",
+                    "unknown": "mdi:help-circle-outline",
+                }.get(state, "mdi:help-circle-outline"),
                 rolle=role,
                 ieee=ieee,
                 nwk=_attr(zha_device, "nwk"),

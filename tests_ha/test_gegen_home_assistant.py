@@ -109,6 +109,35 @@ async def _nutzlast(registrierung) -> dict:
     return nutzlast
 
 
+async def test_registry_fallback_nodes_keep_their_entity_link(hass, eintrag):
+    """The safety-net view should remain clickable even without a ZHA gateway."""
+    from homeassistant.helpers import (
+        area_registry as ar,
+        device_registry as dr,
+        entity_registry as er,
+    )
+
+    zha_entry = MockConfigEntry(domain="zha", title="ZHA")
+    zha_entry.add_to_hass(hass)
+    area = ar.async_get(hass).async_create("Küche")
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=zha_entry.entry_id,
+        identifiers={("zha", "00:11:22:33:44:55:66:01")},
+        name="Küchenlampe",
+    )
+    dr.async_get(hass).async_update_device(device.id, area_id=area.id)
+    entity = er.async_get(hass).async_get_or_create(
+        "light", "zha", "00:11:22:33:44:55:66:01",
+        device_id=device.id, original_name="Küchenlampe",
+    )
+
+    async_setup_spatial(hass, eintrag)
+    payload = hass.data["spatial_hub_providers"][EIGENE_DOMAIN]["data"]()
+    nodes = {node["id"]: node for node in payload["nodes"]}
+
+    assert nodes[f"device-{device.id}"]["entity_id"] == entity.entity_id
+
+
 async def test_ohne_zha_liefert_data_eine_leere_ebene(registrierung):
     """Kein ZHA im Haus heisst leer -- nicht kaputt.
 
